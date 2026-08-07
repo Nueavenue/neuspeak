@@ -14,13 +14,24 @@ export const aiRequestSchema = z.object({
 });
 
 export const aiResponseSchema = z.object({
-	reply: z.string()
+	reply: z.string(),
+	audio: z
+		.object({
+			data: z.string(), // base64-encoded audio bytes
+			format: z.string()
+		})
+		.optional()
 });
 
 export const asrResponseSchema = z.object({
 	transcript: z.string(),
 	durationMs: z.number(),
 	confidence: z.number().min(0).max(1)
+});
+
+export const realtimeSessionResponseSchema = z.object({
+	value: z.string(),
+	expiresAt: z.number().nullable()
 });
 
 export const errorResponseSchema = z.object({

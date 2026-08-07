@@ -1,8 +1,9 @@
 import { json } from '@sveltejs/kit';
-import { env } from '$env/dynamic/private';
+import { toFile } from 'openai';
 import type { RequestHandler } from './$types';
+import { openai, TRANSCRIBE_MODEL } from '$lib/server/openai';
 
-const MAX_AUDIO_BYTES = 10 * 1024 * 1024; // 10MB
+const MAX_AUDIO_BYTES = 10 * 1024 * 1024; // 10MB (OpenAI's own cap on this endpoint is 25MB)
 
 function errorJson(message: string, status: number) {
 	return json({ error: message }, { status });
@@ -34,31 +35,33 @@ export const POST: RequestHandler = async ({ request }) => {
 		return errorJson(`Audio too large (max ${MAX_AUDIO_BYTES / (1024 * 1024)}MB)`, 413);
 	}
 
-	try {
-		const startedAt = Date.now();
+	const startedAt = Date.now();
 
-		// The key is read on the server only and is never sent to the client.
-		// Not called yet — returning a stub transcript until this is wired.
-		//
-		// TODO(OpenAI transcription): POST the buffer as multipart/form-data (field "file")
-		// to /v1/audio/transcriptions with model "gpt-transcribe", using env.OPENAI_API_KEY.
-		// Guide: https://developers.openai.com/api/docs/guides/speech-to-text
+	try {
+		// Docs: https://developers.openai.com/api/docs/guides/speech-to-text
 		// Reference: https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create
-		// For live/streaming mic audio instead of a recorded blob, use a Realtime transcription
-		// session (model "gpt-live-transcribe") per:
-		// https://developers.openai.com/api/docs/guides/realtime
-		void env.OPENAI_API_KEY;
-		void env.TRANSCRIBE_MODEL;
+		// gpt-transcribe accepts webm directly (mp3/mp4/mpeg/mpga/m4a/wav/webm are all supported).
+		const file = await toFile(Buffer.from(buffer), 'utterance.webm', {
+			type: contentType || 'audio/webm'
+		});
+
+		const transcription = await openai.audio.transcriptions.create({
+			file,
+			model: TRANSCRIBE_MODEL
+		});
+
+		const transcript = transcription.text?.trim();
+		if (!transcript) {
+			return errorJson('Could not transcribe audio — try recording again', 422);
+		}
 
 		const durationMs = Date.now() - startedAt;
 
-		return json({
-			transcript: '[stub transcript — ASR not yet wired to OpenAI]',
-			durationMs,
-			confidence: 0
-		});
+		// gpt-transcribe's default JSON response doesn't include a confidence score;
+		// hardcode 1 until we opt into a model/response_format that reports one.
+		return json({ transcript, durationMs, confidence: 1 });
 	} catch (err) {
 		console.error('POST /api/asr failed', err);
-		return errorJson('Internal server error', 500);
+		return errorJson('Transcription is unavailable right now — please try again.', 502);
 	}
 };

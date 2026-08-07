@@ -1,26 +1,29 @@
 <script>
+	import { tick } from 'svelte';
 	import HeaderStatus from '$lib/components/HeaderStatus.svelte';
 	import StartButton from '$lib/components/StartButton.svelte';
-	import VoiceRecorder from '$lib/components/VoiceRecorder.svelte';
+	import RealtimeVoice from '$lib/components/RealtimeVoice.svelte';
 	import ChatLog from '$lib/components/ChatLog.svelte';
 	import DebugPanel from '$lib/components/DebugPanel.svelte';
 
 	/**
 	 * @typedef {'idle' | 'mic' | 'connecting' | 'ready' | 'error'} ConnState
-	 * @typedef {{ role: 'user' | 'assistant'; text: string }} ChatMessage
+	 * @typedef {'idle' | 'connecting' | 'live' | 'closed' | 'error'} RealtimeStatus
+	 * @typedef {{ role: 'user' | 'assistant'; text: string; streaming?: boolean }} ChatMessage
 	 */
 
 	/** @type {ConnState} */
 	let connState = $state('idle');
+	/** @type {RealtimeStatus} */
+	let realtimeStatus = $state('idle');
 	/** @type {ChatMessage[]} */
 	let messages = $state([]);
 	/** @type {string[]} */
 	let logs = $state([]);
 	let draft = $state('');
-	let sending = $state(false);
 
-	/** @type {ReturnType<typeof VoiceRecorder> | undefined} */
-	let voiceRecorder = $state();
+	/** @type {ReturnType<typeof RealtimeVoice> | undefined} */
+	let realtimeVoice = $state();
 
 	function pushLog(entry) {
 		const stamp = new Date().toLocaleTimeString();
@@ -31,9 +34,11 @@
 		connState = phase;
 	}
 
-	function handleSuccess() {
+	async function handleSuccess() {
 		connState = 'ready';
-		pushLog('Connection ready');
+		pushLog('Connection ready — starting live voice session…');
+		await tick();
+		await realtimeVoice?.connect();
 	}
 
 	function handleError(message) {
@@ -41,62 +46,52 @@
 		pushLog(`Failed: ${message}`);
 	}
 
-	function handleVoiceStart() {
-		pushLog('Voice: recording started');
+	function handleRealtimeStatus(status) {
+		realtimeStatus = status;
+		if (status === 'error') {
+			connState = 'error';
+		}
 	}
 
-	function handleVoiceStop(blob) {
-		pushLog(`Voice: recording stopped (${(blob.size / 1024).toFixed(1)} KB, ${blob.type})`);
+	/** @param {string} text */
+	function handleUserTranscript(text) {
+		messages = [...messages, { role: 'user', text }];
 	}
 
-	async function handleVoiceSend(blob) {
-		pushLog(`Voice: sending ${(blob.size / 1024).toFixed(1)} KB clip…`);
-		// TODO(Step 2/3): POST to /api/asr for a transcript, then /api/coach for a reply.
-		await new Promise((resolve) => setTimeout(resolve, 400));
-		pushLog('Voice: send pipeline not wired yet — recorder reset');
-		voiceRecorder?.resetAfterSend();
+	/** @param {string} delta */
+	function handleAssistantDelta(delta) {
+		if (!delta) return;
+		const last = messages[messages.length - 1];
+		if (last?.role === 'assistant' && last.streaming) {
+			messages = [...messages.slice(0, -1), { ...last, text: last.text + delta }];
+		} else {
+			messages = [...messages, { role: 'assistant', text: delta, streaming: true }];
+		}
 	}
 
-	async function sendMessage(event) {
+	/** @param {string} fullText */
+	function handleAssistantDone(fullText) {
+		const last = messages[messages.length - 1];
+		if (last?.role === 'assistant' && last.streaming) {
+			messages = [...messages.slice(0, -1), { role: 'assistant', text: fullText || last.text, streaming: false }];
+		} else if (fullText) {
+			messages = [...messages, { role: 'assistant', text: fullText, streaming: false }];
+		}
+	}
+
+	function handleRealtimeError(message) {
+		pushLog(`Realtime error: ${message}`);
+	}
+
+	function sendMessage(event) {
 		event.preventDefault();
 		const text = draft.trim();
-		if (!text || sending) return;
+		if (!text || realtimeStatus !== 'live') return;
 
-		if (connState !== 'ready') {
-			pushLog('Send blocked — start a conversation first');
-			return;
-		}
-
-		sending = true;
 		messages = [...messages, { role: 'user', text }];
 		draft = '';
-		pushLog(`Sending to /api/ai: "${text}"`);
-
-		const started = performance.now();
-
-		try {
-			const res = await fetch('/api/ai', {
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ message: text })
-			});
-
-			const elapsed = Math.round(performance.now() - started);
-			const data = await res.json();
-
-			if (!res.ok) {
-				throw new Error(data?.error || `AI request failed (${res.status})`);
-			}
-
-			messages = [...messages, { role: 'assistant', text: data.reply }];
-			pushLog(`AI reply in ${elapsed}ms`);
-		} catch (err) {
-			const message = err instanceof Error ? err.message : 'Send failed';
-			connState = 'error';
-			pushLog(`AI error: ${message}`);
-		} finally {
-			sending = false;
-		}
+		pushLog(`Sending: "${text}"`);
+		realtimeVoice?.sendText(text);
 	}
 </script>
 
@@ -128,7 +123,6 @@
 
 		<StartButton
 			state={connState}
-			busy={sending}
 			onphase={handlePhase}
 			onsuccess={handleSuccess}
 			onerror={handleError}
@@ -137,12 +131,14 @@
 	</section>
 
 	{#if connState === 'ready'}
-		<VoiceRecorder
-			bind:this={voiceRecorder}
-			onstart={handleVoiceStart}
-			onstop={handleVoiceStop}
-			onsend={handleVoiceSend}
+		<RealtimeVoice
+			bind:this={realtimeVoice}
+			onstatus={handleRealtimeStatus}
 			onlog={pushLog}
+			onerror={handleRealtimeError}
+			onusertranscript={handleUserTranscript}
+			onassistantdelta={handleAssistantDelta}
+			onassistantdone={handleAssistantDone}
 		/>
 	{/if}
 
@@ -154,16 +150,16 @@
 			<input
 				id="practice-input"
 				class="min-w-0 flex-1 rounded-[1.25rem] border border-cream-200 bg-cream-50 px-4 py-3 text-sm text-ink outline-none transition placeholder:text-ink-soft focus:border-brand focus:bg-white"
-				placeholder={connState === 'ready' ? 'Type a practice line…' : 'Start conversation first…'}
+				placeholder={realtimeStatus === 'live' ? 'Or type a practice line…' : 'Start conversation first…'}
 				bind:value={draft}
-				disabled={sending || connState !== 'ready'}
+				disabled={realtimeStatus !== 'live'}
 			/>
 			<button
 				type="submit"
 				class="rounded-[1.25rem] bg-ink px-4 py-3 text-sm font-bold text-white transition enabled:hover:bg-brand disabled:cursor-not-allowed disabled:opacity-50"
-				disabled={sending || connState !== 'ready' || !draft.trim()}
+				disabled={realtimeStatus !== 'live' || !draft.trim()}
 			>
-				{sending ? '…' : 'Send'}
+				Send
 			</button>
 		</div>
 	</form>
