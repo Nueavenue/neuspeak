@@ -1,3 +1,4 @@
+// src/lib/server/account.ts
 // Chars chosen to avoid visually ambiguous characters (0/O, 1/I) since this ID
 // is shown to users and might be typed/read aloud.
 const DISPLAY_ID_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';

@@ -1,3 +1,4 @@
+<!-- src/lib/components/DebugPanel.svelte -->
 <script>
 	import { SESSION_STATE_LABELS } from '$lib/session';
 	import { reportApiCall } from '$lib/apiInstrumentation';

@@ -1,3 +1,4 @@
+<!-- src/lib/components/RealtimeVoice.svelte -->
 <script>
 	/** @typedef {import('$lib/session').SessionState} SessionState */
 

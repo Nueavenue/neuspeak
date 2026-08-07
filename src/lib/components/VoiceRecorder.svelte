@@ -1,3 +1,4 @@
+<!-- src/lib/components/VoiceRecorder.svelte -->
 <script>
 	/**
 	 * @typedef {'idle' | 'recording' | 'review' | 'sending'} RecorderState

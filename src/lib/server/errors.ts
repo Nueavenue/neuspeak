@@ -1,3 +1,4 @@
+// src/lib/server/errors.ts
 import { json } from '@sveltejs/kit';
 
 /**
@@ -11,7 +12,10 @@ export type ApiErrorInfo =
 	| 'payload_too_large'
 	| 'upstream_auth_error'
 	| 'upstream_error'
-	| 'server_error';
+	| 'server_error'
+	| 'unauthenticated'
+	| 'not_found'
+	| 'db_error';
 
 interface ApiErrorOptions {
 	/** e.g. "POST /api/ai" — only ever printed to the server console. */
@@ -66,7 +70,8 @@ export function apiError({ route, status, error, info, reason, cause }: ApiError
  * 502. The client never sees OpenAI's actual response body.
  */
 export function upstreamError(route: string, cause: unknown): Response {
-	const status = cause instanceof Error ? (cause as Error & { status?: unknown }).status : undefined;
+	const status =
+		cause instanceof Error ? (cause as Error & { status?: unknown }).status : undefined;
 
 	if (status === 401 || status === 403) {
 		return apiError({

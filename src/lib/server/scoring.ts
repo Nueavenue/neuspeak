@@ -1,3 +1,4 @@
+// src/lib/server/scoring.ts
 import { openai, JUDGE_MODEL } from './openai';
 
 export interface BattleScore {

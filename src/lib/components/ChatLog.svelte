@@ -1,3 +1,4 @@
+<!-- src/lib/components/ChatLog.svelte -->
 <script>
 	/**
 	 * @typedef {{ data: string; format: string }} AudioPayload

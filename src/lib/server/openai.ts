@@ -1,3 +1,4 @@
+// src/lib/server/openai.ts
 import OpenAI from 'openai';
 import { env } from '$env/dynamic/private';
 

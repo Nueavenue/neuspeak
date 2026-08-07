@@ -1,3 +1,4 @@
+// src/lib/schemas.ts
 import { z } from 'zod';
 
 export const healthResponseSchema = z.object({
@@ -78,6 +79,48 @@ export const leaderboardResponseSchema = z.object({
 	leaderboard: z.array(leaderboardEntrySchema)
 });
 
+export const conversationSchema = z.object({
+	id: z.string(),
+	title: z.string().nullable(),
+	createdAt: z.string(),
+	updatedAt: z.string()
+});
+
+export const conversationsListResponseSchema = z.object({
+	conversations: z.array(conversationSchema)
+});
+
+export const createConversationResponseSchema = z.object({
+	conversation: conversationSchema
+});
+
+export const messageRoleSchema = z.enum(['user', 'assistant', 'system']);
+
+export const messageSchema = z.object({
+	id: z.string(),
+	role: messageRoleSchema,
+	content: z.string(),
+	createdAt: z.string()
+});
+
+export const conversationDetailResponseSchema = z.object({
+	conversation: conversationSchema,
+	messages: z.array(messageSchema)
+});
+
+export const createMessageRequestSchema = z.object({
+	role: messageRoleSchema,
+	content: z
+		.string()
+		.trim()
+		.min(1, 'Message content is required')
+		.max(8000, 'Message is too long (max 8000 characters)')
+});
+
+export const createMessageResponseSchema = z.object({
+	message: messageSchema
+});
+
 export const errorResponseSchema = z.object({
 	error: z.string(),
 	/** Short machine-friendly category, e.g. "invalid_input", "upstream_error". */
@@ -92,3 +135,7 @@ export type AccountStats = z.infer<typeof accountStatsSchema>;
 export type BattleResponse = z.infer<typeof battleResponseSchema>;
 export type LeaderboardResponse = z.infer<typeof leaderboardResponseSchema>;
 export type ErrorResponse = z.infer<typeof errorResponseSchema>;
+export type Conversation = z.infer<typeof conversationSchema>;
+export type Message = z.infer<typeof messageSchema>;
+export type CreateMessageRequest = z.infer<typeof createMessageRequestSchema>;
+export type ConversationDetailResponse = z.infer<typeof conversationDetailResponseSchema>;

@@ -1,3 +1,4 @@
+<!-- src/routes/practice/+page.svelte -->
 <script>
 	import { onMount } from 'svelte';
 	import VoiceRecorder from '$lib/components/VoiceRecorder.svelte';

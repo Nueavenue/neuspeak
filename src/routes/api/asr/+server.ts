@@ -1,3 +1,4 @@
+// src/routes/api/asr/+server.ts
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { transcribeAudio } from '$lib/server/transcribe';

@@ -1,3 +1,4 @@
+// src/lib/server/leaderboard.ts
 import { prisma } from './db';
 
 interface RankingRow {

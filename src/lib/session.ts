@@ -1,3 +1,4 @@
+// src/lib/session.ts
 /**
  * Single source of truth for NeuSpeak's client-side conversation/session
  * state machine. Both the legacy handshake (mic permission + /api/health)

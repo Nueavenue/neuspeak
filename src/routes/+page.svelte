@@ -1,3 +1,4 @@
+<!-- src/routes/+page.svelte -->
 <script>
 	import { tick, onMount } from 'svelte';
 	import HeaderStatus from '$lib/components/HeaderStatus.svelte';
@@ -44,6 +45,13 @@
 	/** @type {ReturnType<typeof RealtimeVoice> | undefined} */
 	let realtimeVoice = $state();
 
+	// The conversation history "session" (see database/create_conversation_tables.sql
+	// and src/routes/api/conversations/*). One row is created per "Start
+	// conversation" press; every completed turn is appended as a message.
+	// Persistence is best-effort and never blocks the live UI — a failed
+	// save shows up as a debug-panel log line, not a broken conversation.
+	let currentConversationId = $state(/** @type {string | null} */ (null));
+
 	onMount(async () => {
 		try {
 			const res = await fetch('/api/me');
@@ -52,6 +60,44 @@
 			// Non-critical — the voice battle card just shows a loading state.
 		}
 	});
+
+	async function startConversationSession() {
+		try {
+			const res = await fetch('/api/conversations', { method: 'POST' });
+			const data = await res.json();
+			if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+			currentConversationId = data.conversation.id;
+			pushLog(`History: started session "${data.conversation.title}"`);
+		} catch (err) {
+			currentConversationId = null;
+			pushLog(
+				`History: could not start a session — ${err instanceof Error ? err.message : 'unknown error'}`
+			);
+		}
+	}
+
+	/**
+	 * @param {'user' | 'assistant'} role
+	 * @param {string} content
+	 */
+	async function persistMessage(role, content) {
+		if (!currentConversationId || !content.trim()) return;
+		try {
+			const res = await fetch(`/api/conversations/${currentConversationId}/messages`, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ role, content })
+			});
+			if (!res.ok) {
+				const data = await res.json().catch(() => null);
+				throw new Error(data?.error || `HTTP ${res.status}`);
+			}
+		} catch (err) {
+			pushLog(
+				`History: failed to save ${role} message — ${err instanceof Error ? err.message : 'unknown error'}`
+			);
+		}
+	}
 
 	function pushLog(entry) {
 		const stamp = new Date().toLocaleTimeString();
@@ -66,6 +112,7 @@
 	async function handleSuccess() {
 		hasStarted = true;
 		pushLog('Health check passed — starting live voice session…');
+		await startConversationSession();
 		await tick();
 		await realtimeVoice?.connect();
 	}
@@ -98,6 +145,7 @@
 	/** @param {string} text */
 	function handleUserTranscript(text) {
 		messages = [...messages, { role: 'user', text }];
+		persistMessage('user', text);
 	}
 
 	/** @param {string} delta */
@@ -114,11 +162,18 @@
 	/** @param {string} fullText */
 	function handleAssistantDone(fullText) {
 		const last = messages[messages.length - 1];
+		let finalText = '';
 		if (last?.role === 'assistant' && last.streaming) {
-			messages = [...messages.slice(0, -1), { role: 'assistant', text: fullText || last.text, streaming: false }];
+			finalText = fullText || last.text;
+			messages = [
+				...messages.slice(0, -1),
+				{ role: 'assistant', text: finalText, streaming: false }
+			];
 		} else if (fullText) {
-			messages = [...messages, { role: 'assistant', text: fullText, streaming: false }];
+			finalText = fullText;
+			messages = [...messages, { role: 'assistant', text: finalText, streaming: false }];
 		}
+		if (finalText) persistMessage('assistant', finalText);
 	}
 
 	function handleRealtimeError(message) {
@@ -133,20 +188,23 @@
 		messages = [...messages, { role: 'user', text }];
 		draft = '';
 		pushLog(`Sending: "${text}"`);
+		persistMessage('user', text);
 		realtimeVoice?.sendText(text);
 	}
 </script>
 
-<main class="mx-auto flex min-h-screen w-full max-w-xl flex-col gap-5 px-4 py-6 sm:px-6 sm:py-8">
+<main class="max-w-xl gap-5 px-4 py-6 sm:px-6 sm:py-8 mx-auto flex min-h-screen w-full flex-col">
 	<HeaderStatus state={sessionState} />
 
-	<section class="rounded-[1.75rem] bg-white p-4 shadow-soft sm:p-5">
-		<div class="flex items-center justify-between gap-3">
+	<section class="bg-white p-4 shadow-soft sm:p-5 rounded-[1.75rem]">
+		<div class="gap-3 flex items-center justify-between">
 			<div class="min-w-0">
 				<p class="text-sm font-medium text-ink-muted">Voice Battle</p>
 				{#if battleStats}
-					<p class="text-base font-bold text-ink">Rank #{battleStats.rank} · {battleStats.totalPoints} pts</p>
-					<p class="mt-0.5 truncate text-xs text-ink-soft">
+					<p class="text-base font-bold text-ink">
+						Rank #{battleStats.rank} · {battleStats.totalPoints} pts
+					</p>
+					<p class="mt-0.5 text-xs text-ink-soft truncate">
 						{battleStats.id} · {battleStats.battleCount}
 						{battleStats.battleCount === 1 ? 'battle' : 'battles'}
 					</p>
@@ -156,33 +214,33 @@
 			</div>
 			<a
 				href="/practice"
-				class="shrink-0 rounded-2xl bg-ink px-4 py-2.5 text-sm font-bold text-white transition hover:bg-brand"
+				class="rounded-2xl bg-ink px-4 py-2.5 text-sm font-bold text-white hover:bg-brand shrink-0 transition"
 			>
 				Enter battle
 			</a>
 		</div>
 	</section>
 
-	<section class="rounded-[1.75rem] bg-white/80 p-4 shadow-soft backdrop-blur-sm sm:p-5">
-		<div class="mb-4 flex items-center justify-between gap-3">
+	<section class="bg-white/80 p-4 shadow-soft backdrop-blur-sm sm:p-5 rounded-[1.75rem]">
+		<div class="mb-4 gap-3 flex items-center justify-between">
 			<div>
 				<p class="text-sm font-medium text-ink-muted">Welcome back</p>
 				<p class="text-base font-bold text-ink">Let’s get you sounding more natural</p>
 			</div>
 			<div
-				class="flex h-11 w-11 items-center justify-center rounded-full bg-brand-soft text-sm font-bold text-brand-dark"
+				class="h-11 w-11 bg-brand-soft text-sm font-bold text-brand-dark flex items-center justify-center rounded-full"
 			>
 				NS
 			</div>
 		</div>
 
 		<div class="mb-5">
-			<div class="mb-1.5 flex items-center justify-between text-xs font-semibold">
+			<div class="mb-1.5 text-xs font-semibold flex items-center justify-between">
 				<span class="text-ink-muted">Level progress</span>
 				<span class="text-brand-dark">Part 1 · Shell</span>
 			</div>
-			<div class="h-2 overflow-hidden rounded-full bg-cream-200">
-				<div class="h-full w-1/3 rounded-full bg-gradient-to-r from-brand to-brand-light"></div>
+			<div class="h-2 bg-cream-200 overflow-hidden rounded-full">
+				<div class="from-brand to-brand-light h-full w-1/3 rounded-full bg-gradient-to-r"></div>
 			</div>
 		</div>
 
@@ -210,19 +268,21 @@
 
 	<ChatLog {messages} />
 
-	<form class="rounded-[1.75rem] bg-white p-3 shadow-soft sm:p-4" onsubmit={sendMessage}>
+	<form class="bg-white p-3 shadow-soft sm:p-4 rounded-[1.75rem]" onsubmit={sendMessage}>
 		<label class="sr-only" for="practice-input">Practice message</label>
-		<div class="flex gap-2">
+		<div class="gap-2 flex">
 			<input
 				id="practice-input"
-				class="min-w-0 flex-1 rounded-[1.25rem] border border-cream-200 bg-cream-50 px-4 py-3 text-sm text-ink outline-none transition placeholder:text-ink-soft focus:border-brand focus:bg-white"
-				placeholder={sessionState === 'connected' ? 'Or type a practice line…' : 'Start conversation first…'}
+				class="min-w-0 border-cream-200 bg-cream-50 px-4 py-3 text-sm text-ink placeholder:text-ink-soft focus:border-brand focus:bg-white flex-1 rounded-[1.25rem] border transition outline-none"
+				placeholder={sessionState === 'connected'
+					? 'Or type a practice line…'
+					: 'Start conversation first…'}
 				bind:value={draft}
 				disabled={sessionState !== 'connected'}
 			/>
 			<button
 				type="submit"
-				class="rounded-[1.25rem] bg-ink px-4 py-3 text-sm font-bold text-white transition enabled:hover:bg-brand disabled:cursor-not-allowed disabled:opacity-50"
+				class="bg-ink px-4 py-3 text-sm font-bold text-white enabled:hover:bg-brand rounded-[1.25rem] transition disabled:cursor-not-allowed disabled:opacity-50"
 				disabled={sessionState !== 'connected' || !draft.trim()}
 			>
 				Send
@@ -230,5 +290,12 @@
 		</div>
 	</form>
 
-	<DebugPanel {logs} state={sessionState} {apiCalls} {lastError} {lastChangeAt} onapicall={handleApiCall} />
+	<DebugPanel
+		{logs}
+		state={sessionState}
+		{apiCalls}
+		{lastError}
+		{lastChangeAt}
+		onapicall={handleApiCall}
+	/>
 </main>

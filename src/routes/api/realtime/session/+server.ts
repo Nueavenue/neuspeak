@@ -1,3 +1,4 @@
+// src/routes/api/realtime/session/+server.ts
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { env } from '$env/dynamic/private';

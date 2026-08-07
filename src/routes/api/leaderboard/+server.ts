@@ -1,3 +1,4 @@
+// src/routes/api/leaderboard/+server.ts
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getLeaderboard } from '$lib/server/leaderboard';

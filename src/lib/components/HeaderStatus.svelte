@@ -1,3 +1,4 @@
+<!-- src/lib/components/HeaderStatus.svelte -->
 <script>
 	import { SESSION_STATE_LABELS } from '$lib/session';
 

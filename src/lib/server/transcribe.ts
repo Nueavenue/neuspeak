@@ -1,3 +1,4 @@
+// src/lib/server/transcribe.ts
 import { toFile } from 'openai';
 import { openai, TRANSCRIBE_MODEL } from './openai';
 

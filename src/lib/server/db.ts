@@ -1,3 +1,4 @@
+// src/lib/server/db.ts
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
 import { env } from '$env/dynamic/private';
 import { PrismaClient } from './generated/prisma/client';

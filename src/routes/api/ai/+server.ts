@@ -1,3 +1,4 @@
+// src/routes/api/ai/+server.ts
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { aiRequestSchema } from '$lib/schemas';

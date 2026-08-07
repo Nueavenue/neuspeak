@@ -1,3 +1,4 @@
+// src/routes/api/me/+server.ts
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getAccountStats } from '$lib/server/leaderboard';

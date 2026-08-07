@@ -1,3 +1,4 @@
+<!-- src/lib/components/StartButton.svelte -->
 <script>
 	import { isSessionActive, isSessionBusy } from '$lib/session';
 
