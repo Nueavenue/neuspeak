@@ -1,6 +1,9 @@
 <script>
+	import { isSessionActive, isSessionBusy } from '$lib/session';
+
 	/**
-	 * @typedef {'idle' | 'mic' | 'connecting' | 'ready' | 'error'} ConnState
+	 * @typedef {import('$lib/session').SessionState} ConnState
+	 * @typedef {{ ok: boolean; status: number; message: string }} ApiCallInfo
 	 */
 
 	/** @type {{
@@ -9,16 +12,17 @@
 	 *   onphase?: (phase: 'mic' | 'connecting') => void,
 	 *   onsuccess?: () => void,
 	 *   onerror?: (message: string) => void,
-	 *   onlog?: (entry: string) => void
+	 *   onlog?: (entry: string) => void,
+	 *   onapicall?: (route: 'health', info: ApiCallInfo) => void
 	 * }} */
-	let { state, busy = false, onphase, onsuccess, onerror, onlog } = $props();
+	let { state, busy = false, onphase, onsuccess, onerror, onlog, onapicall } = $props();
 
 	function log(entry) {
 		onlog?.(entry);
 	}
 
 	async function handleClick() {
-		if (busy || state === 'connecting' || state === 'mic') return;
+		if (busy || isSessionBusy(state)) return;
 
 		try {
 			onphase?.('mic');
@@ -31,18 +35,30 @@
 			onphase?.('connecting');
 			log('Pinging /api/health…');
 			const started = performance.now();
-			const res = await fetch('/api/health');
+
+			/** @type {Response} */
+			let res;
+			try {
+				res = await fetch('/api/health');
+			} catch {
+				onapicall?.('health', { ok: false, status: 0, message: 'Network error' });
+				throw new Error('Could not reach the server');
+			}
+
 			const elapsed = Math.round(performance.now() - started);
 
 			if (!res.ok) {
+				onapicall?.('health', { ok: false, status: res.status, message: `HTTP ${res.status}` });
 				throw new Error(`Health check failed (${res.status})`);
 			}
 
 			const data = await res.json();
 			if (!data?.ok) {
+				onapicall?.('health', { ok: false, status: res.status, message: 'Response missing ok:true' });
 				throw new Error('Health check returned not ok');
 			}
 
+			onapicall?.('health', { ok: true, status: res.status, message: `ts=${data.ts}` });
 			log(`Health OK in ${elapsed}ms (ts=${data.ts})`);
 			onsuccess?.();
 		} catch (err) {
@@ -56,7 +72,7 @@
 <button
 	type="button"
 	class="group relative w-full overflow-hidden rounded-[1.75rem] bg-gradient-to-b from-brand-light to-brand px-5 pb-5 pt-8 text-left text-white shadow-card transition enabled:hover:brightness-[1.03] enabled:active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-70"
-	disabled={busy || state === 'connecting' || state === 'mic'}
+	disabled={busy || isSessionBusy(state)}
 	onclick={handleClick}
 >
 	<div class="pointer-events-none absolute -right-8 -top-10 h-36 w-36 rounded-full bg-white/15 blur-2xl"></div>
@@ -107,10 +123,14 @@
 			Allow microphone…
 		{:else if state === 'connecting'}
 			Connecting…
-		{:else if state === 'ready'}
+		{:else if state === 'disconnecting'}
+			Ending…
+		{:else if isSessionActive(state)}
 			Restart conversation
 		{:else if state === 'error'}
 			Try again
+		{:else if state === 'disconnected'}
+			Start new conversation
 		{:else}
 			Start conversation
 		{/if}

@@ -1,58 +1,76 @@
 import { json } from '@sveltejs/kit';
-import { toFile } from 'openai';
 import type { RequestHandler } from './$types';
-import { openai, TRANSCRIBE_MODEL } from '$lib/server/openai';
+import { transcribeAudio } from '$lib/server/transcribe';
+import { apiError, upstreamError } from '$lib/server/errors';
 
+const ROUTE = 'POST /api/asr';
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024; // 10MB (OpenAI's own cap on this endpoint is 25MB)
-
-function errorJson(message: string, status: number) {
-	return json({ error: message }, { status });
-}
 
 export const POST: RequestHandler = async ({ request }) => {
 	const contentType = request.headers.get('content-type') ?? '';
 	if (!contentType.startsWith('audio/')) {
-		return errorJson('Expected an audio/* content-type (e.g. audio/webm)', 415);
+		return apiError({
+			route: ROUTE,
+			status: 415,
+			error: 'Expected an audio/* content-type (e.g. audio/webm)',
+			info: 'invalid_content_type'
+		});
 	}
 
 	const contentLength = Number(request.headers.get('content-length') ?? '0');
 	if (contentLength > MAX_AUDIO_BYTES) {
-		return errorJson(`Audio too large (max ${MAX_AUDIO_BYTES / (1024 * 1024)}MB)`, 413);
+		return apiError({
+			route: ROUTE,
+			status: 413,
+			error: `Audio too large (max ${MAX_AUDIO_BYTES / (1024 * 1024)}MB)`,
+			info: 'payload_too_large'
+		});
 	}
 
 	let buffer: ArrayBuffer;
 	try {
 		buffer = await request.arrayBuffer();
-	} catch {
-		return errorJson('Could not read audio body', 400);
+	} catch (err) {
+		return apiError({
+			route: ROUTE,
+			status: 400,
+			error: 'Could not read audio body',
+			info: 'invalid_input',
+			reason: 'Failed to read request body',
+			cause: err
+		});
 	}
 
 	if (buffer.byteLength === 0) {
-		return errorJson('Empty audio payload', 400);
+		return apiError({
+			route: ROUTE,
+			status: 400,
+			error: 'Empty audio payload',
+			info: 'invalid_input'
+		});
 	}
 
 	if (buffer.byteLength > MAX_AUDIO_BYTES) {
-		return errorJson(`Audio too large (max ${MAX_AUDIO_BYTES / (1024 * 1024)}MB)`, 413);
+		return apiError({
+			route: ROUTE,
+			status: 413,
+			error: `Audio too large (max ${MAX_AUDIO_BYTES / (1024 * 1024)}MB)`,
+			info: 'payload_too_large'
+		});
 	}
 
 	const startedAt = Date.now();
 
 	try {
-		// Docs: https://developers.openai.com/api/docs/guides/speech-to-text
-		// Reference: https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create
-		// gpt-transcribe accepts webm directly (mp3/mp4/mpeg/mpga/m4a/wav/webm are all supported).
-		const file = await toFile(Buffer.from(buffer), 'utterance.webm', {
-			type: contentType || 'audio/webm'
-		});
-
-		const transcription = await openai.audio.transcriptions.create({
-			file,
-			model: TRANSCRIBE_MODEL
-		});
-
-		const transcript = transcription.text?.trim();
+		const transcript = await transcribeAudio(buffer, contentType);
 		if (!transcript) {
-			return errorJson('Could not transcribe audio — try recording again', 422);
+			return apiError({
+				route: ROUTE,
+				status: 422,
+				error: 'Could not transcribe audio — try recording again',
+				info: 'invalid_input',
+				reason: 'OpenAI returned no speech/empty transcript'
+			});
 		}
 
 		const durationMs = Date.now() - startedAt;
@@ -61,7 +79,6 @@ export const POST: RequestHandler = async ({ request }) => {
 		// hardcode 1 until we opt into a model/response_format that reports one.
 		return json({ transcript, durationMs, confidence: 1 });
 	} catch (err) {
-		console.error('POST /api/asr failed', err);
-		return errorJson('Transcription is unavailable right now — please try again.', 502);
+		return upstreamError(ROUTE, err);
 	}
 };

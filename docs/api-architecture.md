@@ -17,6 +17,12 @@ generate a text/audio reply → play it back) still exists as `/api/asr` and
 kept as a simpler fallback pattern and as a reference for anything that needs
 a bounded, one-shot request instead of a live session.
 
+A separate, lighter-weight feature — **Voice Battle** (`/practice`) — reuses
+that same request/response shape (record one clip → transcribe → grade it)
+but is a self-contained mini-game: every visitor gets an anonymous account,
+records short utterances for points, and appears on a shared leaderboard.
+See "Voice Battle & persistence" below.
+
 High-level data flow:
 
 ```
@@ -106,6 +112,79 @@ conversation and both get a spoken reply through the same audio stream.
 > again, check the debug panel — unhandled event types aren't currently
 > logged verbosely, so add a temporary `console.log(event)` in
 > `handleServerEvent` if replies stop showing up in the chat log.
+
+### Connection state machine (`src/lib/session.ts`)
+
+The header badge, the Start/Restart button, `RealtimeVoice.svelte`, and the
+debug panel all read/write **one** shared vocabulary instead of each
+component inventing its own idea of "connected." That vocabulary lives in
+`src/lib/session.ts` as the `SessionState` type:
+
+```
+idle → mic → connecting → connected ⇄ sending → disconnecting → disconnected
+                              ↑                                       │
+                              └───────────── Start/Restart ───────────┘
+any state → error (on failure)
+```
+
+| State | Meaning | Set by |
+|---|---|---|
+| `idle` | Before any attempt | initial value |
+| `mic` | Requesting microphone permission | `StartButton.svelte` |
+| `connecting` | Health check, then Realtime token + WebRTC handshake | `StartButton.svelte`, then `RealtimeVoice.svelte` |
+| `connected` | Live session, coach is listening | `RealtimeVoice.svelte` |
+| `sending` | A turn is in flight (user just finished speaking, a typed message was sent, or the assistant's reply is streaming) | `RealtimeVoice.svelte` |
+| `disconnecting` | "End conversation" was clicked, cleanup running | `RealtimeVoice.svelte` |
+| `disconnected` | Session fully closed — no more calls will fire until Start is clicked again | `RealtimeVoice.svelte` |
+| `error` | The start attempt or an in-session event failed | `StartButton.svelte` or `RealtimeVoice.svelte` |
+
+`+page.svelte` holds the single source of truth (`sessionState`) and just
+relays it down; it never derives a second, competing state variable. Helper
+predicates (`isSessionActive`, `isSessionAtRest`, `isSessionBusy` in
+`src/lib/session.ts`) centralize the "can I send/can I click Start" checks
+so button-disabled logic can't drift out of sync with the state list.
+
+### Cleanup on "End conversation"
+
+Clicking **End conversation** (rendered inside `RealtimeVoice.svelte` while
+`connected`/`sending`) calls `disconnect()`, which:
+
+1. Sets state to `disconnecting` and logs "Cleanup started" to the debug
+   panel.
+2. Runs `teardown()`, which — each step isolated in its own `try/catch` so
+   one failure can't block the rest — removes the data channel's `message`
+   listener and closes it, stops every microphone `MediaStreamTrack`, closes
+   the `RTCPeerConnection` (there's no separate "close session" REST call for
+   Realtime over WebRTC; closing the peer connection **is** what ends the
+   call server-side), and detaches the remote `<audio>` element.
+3. Sets state to `disconnected` and logs a final confirmation line.
+
+Every one of those steps is logged individually to the debug panel, so "what
+did cleanup actually close?" is always answerable without opening devtools.
+
+`handleServerEvent` also ignores (and logs) any data-channel message that
+somehow still arrives while `disconnecting`/`disconnected` — belt-and-braces
+against a message event that was already queued in the browser's event loop
+before `close()` took effect.
+
+### Detecting stray API calls (`src/lib/apiInstrumentation.ts`)
+
+`reportApiCall(route, state)` is a small, non-blocking helper every client
+call to `/api/asr` or `/api/ai` should go through (currently used by the
+debug panel's "Test /api/asr" / "Test /api/ai" buttons — wrap any future
+call site with it too). It:
+
+- Always logs the call and the session state it fired in
+  (`console.debug` in dev).
+- If `state` isn't `connected` or `sending` — i.e. `idle` or `disconnected`
+  — logs a `console.warn` and returns `isStray: true`, which the debug panel
+  surfaces as a dismissible amber banner. This is what makes a stale
+  listener/timer/recorder callback firing after "End conversation" loud
+  instead of silent.
+
+It deliberately **warns rather than throws**, so it can wrap manual test
+tooling (which should always be able to fire on demand) as well as any real
+call sites without breaking either.
 
 ## Legacy v1 architecture (HTTP, kept but unused by the UI)
 
@@ -197,6 +276,8 @@ Accepts `{ "message": string }`, validated with a Zod schema
 | `TRANSCRIBE_MODEL` | Transcription model for `/api/asr`. | `gpt-transcribe` |
 | `REALTIME_MODEL` | Model for the live Realtime/WebRTC session (`/api/realtime/session`). | `gpt-realtime-2.1` |
 | `REALTIME_VOICE` | Voice preset for the tutor's live spoken replies. Options: `alloy`, `ash`, `ballad`, `coral`, `echo`, `sage`, `shimmer`, `verse`, `marin`, `cedar`. | `marin` |
+| `JUDGE_MODEL` | Text model that grades Voice Battle recordings (`/api/battle`). | `gpt-4o-mini` |
+| `DATABASE_URL` | Prisma datasource URL for Voice Battle persistence. | `file:./dev.db` |
 | `ORIGIN_URL` | Local/prod origin, reserved for CORS/redirect config as the app grows. | `http://localhost:5173` |
 
 `.env` holds real values and is gitignored. `.env.example` mirrors the same
@@ -209,6 +290,80 @@ key in `.env.example`.
 > will reject `modalities: ["text", "audio"]`, and a Realtime-only model
 > isn't valid for `/v1/chat/completions` at all. Both fail with a 502 from
 > `/api/ai` (check the server terminal for the underlying OpenAI error).
+
+## Voice Battle & persistence
+
+`/practice` is a small gamified layer on top of the same ASR pipeline:
+record one short utterance, get it graded 0-100 by an LLM judge, and see
+where you land on a shared leaderboard. Unlike the conversation flow above,
+this needs **real, shared persistence** — a leaderboard only means something
+if everyone's scores live in the same place, not just each visitor's own
+browser.
+
+### Data layer
+- **Prisma** + **SQLite** (`prisma/schema.prisma`, `DATABASE_URL` env var,
+  file lives at `dev.db` in the project root, gitignored). SQLite is fine for local dev
+  and a single-instance deploy; swap `provider`/`url` in the schema to
+  Postgres (e.g. Vercel Postgres/Neon) for a real multi-instance production
+  deploy — the schema itself doesn't need to change.
+- Two models: `Account` (one row per browser, see below) and `Battle` (one
+  row per graded recording, with `accountId`, `transcript`, `points`,
+  `feedback`, `durationMs`, `createdAt`).
+- `src/lib/server/db.ts` exports a cached `PrismaClient` singleton (avoids
+  reconnecting on every Vite HMR reload in dev).
+
+### Accounts (anonymous, not a real login)
+- `src/hooks.server.ts` runs on every request: if the visitor doesn't have
+  an `ns_account` cookie, it creates an `Account` row and sets a signed,
+  **httpOnly** cookie holding the internal `Account.id`. `event.locals.accountId`
+  / `event.locals.accountDisplayId` are populated for every route after that.
+- The httpOnly cookie means the account identity can't be read or forged
+  from client JS — a learner can't just edit `localStorage` to fake a
+  higher score, unlike a fully client-side version of this feature.
+- The public-facing ID shown in the UI (`NS-A1B2C3D4`, `src/lib/server/account.ts`)
+  is intentionally separate from the internal Prisma ID.
+- This is device/browser identity, not a real account system — no
+  email/password, no cross-device sync. If real login is ever wanted, the
+  natural upgrade path is to link an `Account` row to a real auth provider
+  instead of only a cookie.
+
+### `POST /api/battle`
+Accepts a raw `audio/webm` binary body, same validation shape as `/api/asr`,
+plus an `X-Recording-Duration-Ms` header (client-reported clip length, used
+as scoring context only — never trusted for anything security-sensitive).
+1. Transcribes the clip (shared `transcribeAudio()` helper in
+   `src/lib/server/transcribe.ts`, used by both `/api/asr` and `/api/battle`).
+2. Grades the transcript via `scoreBattle()` (`src/lib/server/scoring.ts`) —
+   a Chat Completions call with `JUDGE_MODEL` (defaults to `gpt-4o-mini`,
+   a plain text model — no audio in or out here) and
+   `response_format: { type: "json_object" }`, returning
+   `{ fluency, vocabulary, grammar, overall, feedback }` each 0-100.
+3. Saves a `Battle` row for `locals.accountId` with `points = score.overall`.
+4. Returns `{ transcript, score, points, stats }`, where `stats` is the same
+   shape as `GET /api/me` — so the client can update the UI from one response
+   without a second round trip.
+
+### `GET /api/me`
+Returns the current account's stats: `{ id, totalPoints, battleCount, rank,
+totalAccounts, history }`, where `history` is the account's most recent
+battles. Rank/totals are computed live via `prisma.battle.groupBy` in
+`src/lib/server/leaderboard.ts` — there's no separately-maintained counter
+that could drift out of sync.
+
+### `GET /api/leaderboard`
+Returns `{ leaderboard: [{ rank, id, totalPoints, battles }, ...] }` for the
+top 20 accounts by total points, using the same ranking helper as `/api/me`.
+
+### `/practice` page
+Reuses `VoiceRecorder.svelte` (the bounded record/review/send component from
+the original v1 flow — a good fit here since a "battle" is one bounded
+utterance, not an open-ended conversation) wired to `POST /api/battle`
+instead of `/api/asr` + `/api/ai`. Shows the account's rank/points/battle
+count, the graded result with a feedback tip, battle history, and the
+leaderboard (with the current account highlighted).
+
+The landing page (`/`) shows a compact "Voice Battle" card (rank + points +
+a link into `/practice`), loaded via the same `GET /api/me`.
 
 ## Security and best practices
 
@@ -250,19 +405,37 @@ key in `.env.example`.
       `src/lib/server/*`.
 - [ ] If you change models: update the relevant env var (`MODEL_NAME`,
       `COACH_VOICE`, `TRANSCRIBE_MODEL`, `REALTIME_MODEL`, `REALTIME_VOICE`,
-      or a new one) in **both** `.env.example` and this doc — don't let them
-      drift.
+      `JUDGE_MODEL`, or a new one) in **both** `.env.example` and this doc —
+      don't let them drift.
+- [ ] If you change `prisma/schema.prisma`: run
+      `npx prisma migrate dev --name <description>` to create a migration,
+      and commit the generated `prisma/migrations/` folder (but never
+      `dev.db` itself — that stays gitignored).
 - [ ] Test with curl before trusting the UI:
       - `curl http://localhost:5173/api/health`
       - `curl http://localhost:5173/api/realtime/session` (should return `{ "value": "ek_...", "expiresAt": ... }`)
       - `curl -X POST http://localhost:5173/api/ai -H "content-type: application/json" -d '{"message":"Hi"}'`
       - `curl -X POST http://localhost:5173/api/asr -H "content-type: audio/webm" --data-binary @sample.webm`
+      - `curl http://localhost:5173/api/me` and `curl http://localhost:5173/api/leaderboard`
+        (note: without a browser's cookie jar, curl gets a fresh anonymous
+        account on every call — pass `-c cookies.txt -b cookies.txt` to
+        persist one across requests)
 - [ ] Verify the UI end-to-end: click "Start conversation" → grant mic
       access → `RealtimeVoice` shows "Live — just start talking" → speak a
       sentence → it appears as a user message → the tutor's reply streams in
       as an assistant message **and** you hear it play automatically → try
       the text input too (should reply the same way through the live
       session) → debug panel shows connection/session events.
+- [ ] Verify cleanup: click "End conversation" → header/debug panel show
+      `disconnecting` then `disconnected` → debug panel logs show the data
+      channel, mic tracks, and peer connection each being closed → open the
+      Network tab and confirm **no** further `/api/asr`, `/api/ai`, or
+      `api.openai.com` traffic fires → click "Start conversation" again and
+      confirm it starts a fresh session (not a mix of old + new state).
+- [ ] If you add a new client call site to `/api/asr` or `/api/ai`, wrap it
+      with `reportApiCall()` from `src/lib/apiInstrumentation.ts` so a stray
+      call after disconnect shows up as a warning instead of silently
+      succeeding.
 - [ ] If a call fails, check the server terminal output (not just the
       browser) — errors are logged server-side via `console.error` and
       never leak OpenAI error internals to the client response. For Realtime

@@ -1,3 +1,4 @@
+.env
 node_modules
 
 # Output
@@ -21,3 +22,12 @@ Thumbs.db
 # Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Prisma (local SQLite dev database + generated client)
+# DATABASE_URL="file:./dev.db" is resolved relative to the project root
+# (where prisma.config.ts lives), not the prisma/ folder.
+/dev.db
+/dev.db-journal
+/src/lib/server/generated
+
+.vercel

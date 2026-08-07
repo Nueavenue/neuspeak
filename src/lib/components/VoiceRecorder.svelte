@@ -7,7 +7,7 @@
 	 *   disabled?: boolean,
 	 *   onstart?: () => void,
 	 *   onstop?: (blob: Blob) => void,
-	 *   onsend?: (blob: Blob) => void,
+	 *   onsend?: (blob: Blob, durationMs: number) => void,
 	 *   onlog?: (entry: string) => void
 	 * }} */
 	let { disabled = false, onstart, onstop, onsend, onlog } = $props();
@@ -174,7 +174,7 @@
 		if (!audioBlob || recState === 'sending') return;
 		recState = 'sending';
 		log('Sending recording…');
-		onsend?.(audioBlob);
+		onsend?.(audioBlob, elapsedMs);
 	}
 
 	export function resetAfterSend() {

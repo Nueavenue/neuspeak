@@ -27,6 +27,12 @@ export const COACH_VOICE = env.COACH_VOICE || 'alloy';
 export const REALTIME_MODEL = env.REALTIME_MODEL || 'gpt-realtime-2.1';
 export const REALTIME_VOICE = env.REALTIME_VOICE || 'marin';
 
+// Voice battle scoring (src/lib/server/scoring.ts) is a cheap, fast, plain
+// text judging task — no audio in or out — so it uses a lightweight text
+// model rather than CHAT_MODEL (which must be audio-capable) or a Realtime
+// model.
+export const JUDGE_MODEL = env.JUDGE_MODEL || 'gpt-4o-mini';
+
 export const COACH_SYSTEM_PROMPT = `You are NeuSpeak, a warm, encouraging English speaking coach for non-native speakers.
 Reply to what the learner said in natural, conversational English, like a friendly native-speaking tutor.
 Keep replies short (1-3 sentences) so the conversation stays fast-paced and speech-focused.

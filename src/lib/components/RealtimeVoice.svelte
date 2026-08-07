@@ -1,8 +1,8 @@
 <script>
-	/** @typedef {'idle' | 'connecting' | 'live' | 'closed' | 'error'} RealtimeStatus */
+	/** @typedef {import('$lib/session').SessionState} SessionState */
 
 	/** @type {{
-	 *   onstatus?: (status: RealtimeStatus) => void,
+	 *   onstatus?: (status: SessionState) => void,
 	 *   onlog?: (entry: string) => void,
 	 *   onerror?: (message: string) => void,
 	 *   onusertranscript?: (text: string) => void,
@@ -11,7 +11,7 @@
 	 * }} */
 	let { onstatus, onlog, onerror, onusertranscript, onassistantdelta, onassistantdone } = $props();
 
-	/** @type {RealtimeStatus} */
+	/** @type {SessionState} */
 	let status = $state('idle');
 	let muted = $state(false);
 
@@ -34,6 +34,14 @@
 	}
 
 	function handleServerEvent(e) {
+		// Once we've started (or finished) tearing down, ignore anything that
+		// still arrives on the data channel — this is exactly the kind of
+		// "stray traffic after end" the debug panel should never have to show.
+		if (status === 'disconnecting' || status === 'disconnected') {
+			log(`Realtime: ignored stray event after disconnect (${status})`);
+			return;
+		}
+
 		/** @type {any} */
 		let event;
 		try {
@@ -51,6 +59,7 @@
 				break;
 			case 'input_audio_buffer.speech_stopped':
 				log('Realtime: processing…');
+				setStatus('sending');
 				break;
 			case 'conversation.item.input_audio_transcription.completed': {
 				const text = (event.transcript ?? '').trim();
@@ -59,6 +68,7 @@
 			}
 			case 'response.output_audio_transcript.delta':
 			case 'response.audio_transcript.delta':
+				if (status !== 'sending') setStatus('sending');
 				onassistantdelta?.(event.delta ?? '');
 				break;
 			case 'response.output_audio_transcript.done':
@@ -67,6 +77,7 @@
 				break;
 			case 'response.done':
 				log('Realtime: response complete');
+				if (status === 'sending') setStatus('connected');
 				break;
 			case 'error':
 				log(`Realtime error: ${event.error?.message ?? event.message ?? 'unknown error'}`);
@@ -78,8 +89,11 @@
 	}
 
 	export async function connect() {
-		if (status === 'connecting') return;
-		teardown();
+		if (status === 'connecting' || status === 'disconnecting') return;
+		if (pc || dc || localStream) {
+			log('Restarting: closing previous session before reconnecting…');
+			teardown();
+		}
 
 		setStatus('connecting');
 		try {
@@ -135,7 +149,7 @@
 			await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
 
 			await opened;
-			setStatus('live');
+			setStatus('connected');
 			log('Realtime: conversation is live — just start talking');
 		} catch (err) {
 			const message = err instanceof Error ? err.message : 'Failed to connect realtime session';
@@ -146,13 +160,49 @@
 		}
 	}
 
+	/**
+	 * Actually releases every resource tied to the session: mic tracks, the
+	 * data channel, and the peer connection (which is what truly ends the
+	 * Realtime call server-side — there's no separate "close session" REST
+	 * call for the WebRTC transport). Each step is isolated in its own
+	 * try/catch so one failure can't leave the others un-cleaned-up, and
+	 * every step is logged so the debug panel shows exactly what happened.
+	 */
 	function teardown() {
-		dc?.close();
-		dc = null;
-		localStream?.getTracks().forEach((track) => track.stop());
-		localStream = null;
-		pc?.close();
-		pc = null;
+		if (dc) {
+			try {
+				const readyState = dc.readyState;
+				dc.removeEventListener('message', handleServerEvent);
+				dc.close();
+				log(`Cleanup: closed data channel (was ${readyState})`);
+			} catch (err) {
+				log(`Cleanup error (data channel): ${err instanceof Error ? err.message : String(err)}`);
+			}
+			dc = null;
+		}
+
+		if (localStream) {
+			try {
+				const tracks = localStream.getTracks();
+				tracks.forEach((track) => track.stop());
+				log(`Cleanup: stopped ${tracks.length} microphone track(s)`);
+			} catch (err) {
+				log(`Cleanup error (microphone tracks): ${err instanceof Error ? err.message : String(err)}`);
+			}
+			localStream = null;
+		}
+
+		if (pc) {
+			try {
+				pc.ontrack = null;
+				pc.close();
+				log('Cleanup: closed peer connection');
+			} catch (err) {
+				log(`Cleanup error (peer connection): ${err instanceof Error ? err.message : String(err)}`);
+			}
+			pc = null;
+		}
+
 		if (remoteAudioEl) {
 			remoteAudioEl.srcObject = null;
 			remoteAudioEl = undefined;
@@ -160,9 +210,13 @@
 	}
 
 	export function disconnect() {
+		if (status === 'idle' || status === 'disconnecting' || status === 'disconnected') return;
+
+		setStatus('disconnecting');
+		log('Cleanup started: ending conversation…');
 		teardown();
-		setStatus('closed');
-		log('Realtime: conversation ended');
+		setStatus('disconnected');
+		log('Cleanup complete — session disconnected. No further API calls will fire until you start again.');
 	}
 
 	export function setMuted(next) {
@@ -175,11 +229,16 @@
 
 	/** Send a typed message through the same live conversation. */
 	export function sendText(text) {
+		if (status !== 'connected' && status !== 'sending') {
+			onerror?.(`Cannot send — session state is "${status}", not connected`);
+			return;
+		}
 		if (!dc || dc.readyState !== 'open') {
 			onerror?.('Realtime session is not connected yet');
 			return;
 		}
 
+		setStatus('sending');
 		dc.send(
 			JSON.stringify({
 				type: 'conversation.item.create',
@@ -199,10 +258,10 @@
 		<div class="flex items-center gap-3">
 			<span
 				class="flex h-11 w-11 items-center justify-center rounded-full
-				{status === 'live' ? 'bg-brand text-white' : 'bg-cream-100 text-ink-muted'}"
+				{status === 'connected' || status === 'sending' ? 'bg-brand text-white' : 'bg-cream-100 text-ink-muted'}"
 				aria-hidden="true"
 			>
-				{#if status === 'live'}
+				{#if status === 'connected' || status === 'sending'}
 					<span class="relative flex h-3 w-3">
 						<span
 							class="absolute inline-flex h-full w-full animate-ping rounded-full bg-white/70"
@@ -223,8 +282,14 @@
 				<p class="text-sm font-bold text-ink">
 					{#if status === 'connecting'}
 						Connecting…
-					{:else if status === 'live'}
+					{:else if status === 'connected'}
 						{muted ? 'Microphone muted' : 'Live — just start talking'}
+					{:else if status === 'sending'}
+						Coach is responding…
+					{:else if status === 'disconnecting'}
+						Ending conversation…
+					{:else if status === 'disconnected'}
+						Conversation ended
 					{:else if status === 'error'}
 						Connection error
 					{:else}
@@ -235,7 +300,7 @@
 			</div>
 		</div>
 
-		{#if status === 'live'}
+		{#if status === 'connected' || status === 'sending'}
 			<div class="flex shrink-0 gap-2">
 				<button
 					type="button"
@@ -249,9 +314,11 @@
 					class="rounded-full bg-ink px-3 py-2 text-xs font-bold text-white transition hover:bg-brand"
 					onclick={disconnect}
 				>
-					End
+					End conversation
 				</button>
 			</div>
+		{:else if status === 'disconnecting'}
+			<span class="shrink-0 text-xs font-semibold uppercase tracking-wide text-ink-soft">Cleaning up…</span>
 		{/if}
 	</div>
 </section>

@@ -1,5 +1,5 @@
 <script>
-	import { tick } from 'svelte';
+	import { tick, onMount } from 'svelte';
 	import HeaderStatus from '$lib/components/HeaderStatus.svelte';
 	import StartButton from '$lib/components/StartButton.svelte';
 	import RealtimeVoice from '$lib/components/RealtimeVoice.svelte';
@@ -7,23 +7,51 @@
 	import DebugPanel from '$lib/components/DebugPanel.svelte';
 
 	/**
-	 * @typedef {'idle' | 'mic' | 'connecting' | 'ready' | 'error'} ConnState
-	 * @typedef {'idle' | 'connecting' | 'live' | 'closed' | 'error'} RealtimeStatus
+	 * @typedef {import('$lib/session').SessionState} SessionState
 	 * @typedef {{ role: 'user' | 'assistant'; text: string; streaming?: boolean }} ChatMessage
+	 * @typedef {{ id: string; totalPoints: number; battleCount: number; rank: number; totalAccounts: number }} AccountStats
+	 * @typedef {{ ok: boolean; status: number; message: string; at: number } | null} ApiCallInfo
+	 * @typedef {{ health: ApiCallInfo; asr: ApiCallInfo; ai: ApiCallInfo }} ApiCalls
 	 */
 
-	/** @type {ConnState} */
-	let connState = $state('idle');
-	/** @type {RealtimeStatus} */
-	let realtimeStatus = $state('idle');
+	// A single state machine drives the header badge, the Start/Restart
+	// button, and the debug panel. StartButton reports the 'mic' /
+	// 'connecting' pre-flight phases; RealtimeVoice reports every phase of
+	// the live session ('connecting' → 'connected' → 'sending' →
+	// 'disconnecting' → 'disconnected'). Nobody else is allowed to invent a
+	// different vocabulary — see src/lib/session.ts.
+	/** @type {SessionState} */
+	let sessionState = $state('idle');
+	// True once the user has started at least once — keeps the RealtimeVoice
+	// panel mounted (so "Conversation ended" is visible) instead of yanking
+	// it away the instant the session closes.
+	let hasStarted = $state(false);
 	/** @type {ChatMessage[]} */
 	let messages = $state([]);
 	/** @type {string[]} */
 	let logs = $state([]);
 	let draft = $state('');
+	/** @type {AccountStats | null} */
+	let battleStats = $state(null);
+
+	// Debug-panel-only state: never derived from anything secret, purely a
+	// mirror of client-visible connection/API-call outcomes.
+	/** @type {ApiCalls} */
+	let apiCalls = $state({ health: null, asr: null, ai: null });
+	let lastError = $state('');
+	let lastChangeAt = $state(/** @type {number | null} */ (null));
 
 	/** @type {ReturnType<typeof RealtimeVoice> | undefined} */
 	let realtimeVoice = $state();
+
+	onMount(async () => {
+		try {
+			const res = await fetch('/api/me');
+			if (res.ok) battleStats = await res.json();
+		} catch {
+			// Non-critical — the voice battle card just shows a loading state.
+		}
+	});
 
 	function pushLog(entry) {
 		const stamp = new Date().toLocaleTimeString();
@@ -31,25 +59,39 @@
 	}
 
 	function handlePhase(phase) {
-		connState = phase;
+		sessionState = phase;
+		lastChangeAt = Date.now();
 	}
 
 	async function handleSuccess() {
-		connState = 'ready';
-		pushLog('Connection ready — starting live voice session…');
+		hasStarted = true;
+		pushLog('Health check passed — starting live voice session…');
 		await tick();
 		await realtimeVoice?.connect();
 	}
 
 	function handleError(message) {
-		connState = 'error';
+		sessionState = 'error';
+		lastError = message;
+		lastChangeAt = Date.now();
 		pushLog(`Failed: ${message}`);
 	}
 
+	/**
+	 * @param {'health' | 'asr' | 'ai'} route
+	 * @param {{ ok: boolean; status: number; message: string }} info
+	 */
+	function handleApiCall(route, info) {
+		apiCalls = { ...apiCalls, [route]: { ...info, at: Date.now() } };
+		pushLog(`/api/${route} → ${info.ok ? 'OK' : 'FAIL'} (${info.status}) ${info.message}`);
+	}
+
+	/** @param {SessionState} status */
 	function handleRealtimeStatus(status) {
-		realtimeStatus = status;
+		sessionState = status;
+		lastChangeAt = Date.now();
 		if (status === 'error') {
-			connState = 'error';
+			lastError = lastError || 'Realtime session failed';
 		}
 	}
 
@@ -86,7 +128,7 @@
 	function sendMessage(event) {
 		event.preventDefault();
 		const text = draft.trim();
-		if (!text || realtimeStatus !== 'live') return;
+		if (!text || sessionState !== 'connected') return;
 
 		messages = [...messages, { role: 'user', text }];
 		draft = '';
@@ -96,7 +138,30 @@
 </script>
 
 <main class="mx-auto flex min-h-screen w-full max-w-xl flex-col gap-5 px-4 py-6 sm:px-6 sm:py-8">
-	<HeaderStatus state={connState} />
+	<HeaderStatus state={sessionState} />
+
+	<section class="rounded-[1.75rem] bg-white p-4 shadow-soft sm:p-5">
+		<div class="flex items-center justify-between gap-3">
+			<div class="min-w-0">
+				<p class="text-sm font-medium text-ink-muted">Voice Battle</p>
+				{#if battleStats}
+					<p class="text-base font-bold text-ink">Rank #{battleStats.rank} · {battleStats.totalPoints} pts</p>
+					<p class="mt-0.5 truncate text-xs text-ink-soft">
+						{battleStats.id} · {battleStats.battleCount}
+						{battleStats.battleCount === 1 ? 'battle' : 'battles'}
+					</p>
+				{:else}
+					<p class="text-base font-bold text-ink">Loading your stats…</p>
+				{/if}
+			</div>
+			<a
+				href="/practice"
+				class="shrink-0 rounded-2xl bg-ink px-4 py-2.5 text-sm font-bold text-white transition hover:bg-brand"
+			>
+				Enter battle
+			</a>
+		</div>
+	</section>
 
 	<section class="rounded-[1.75rem] bg-white/80 p-4 shadow-soft backdrop-blur-sm sm:p-5">
 		<div class="mb-4 flex items-center justify-between gap-3">
@@ -122,15 +187,16 @@
 		</div>
 
 		<StartButton
-			state={connState}
+			state={sessionState}
 			onphase={handlePhase}
 			onsuccess={handleSuccess}
 			onerror={handleError}
 			onlog={pushLog}
+			onapicall={handleApiCall}
 		/>
 	</section>
 
-	{#if connState === 'ready'}
+	{#if hasStarted}
 		<RealtimeVoice
 			bind:this={realtimeVoice}
 			onstatus={handleRealtimeStatus}
@@ -150,19 +216,19 @@
 			<input
 				id="practice-input"
 				class="min-w-0 flex-1 rounded-[1.25rem] border border-cream-200 bg-cream-50 px-4 py-3 text-sm text-ink outline-none transition placeholder:text-ink-soft focus:border-brand focus:bg-white"
-				placeholder={realtimeStatus === 'live' ? 'Or type a practice line…' : 'Start conversation first…'}
+				placeholder={sessionState === 'connected' ? 'Or type a practice line…' : 'Start conversation first…'}
 				bind:value={draft}
-				disabled={realtimeStatus !== 'live'}
+				disabled={sessionState !== 'connected'}
 			/>
 			<button
 				type="submit"
 				class="rounded-[1.25rem] bg-ink px-4 py-3 text-sm font-bold text-white transition enabled:hover:bg-brand disabled:cursor-not-allowed disabled:opacity-50"
-				disabled={realtimeStatus !== 'live' || !draft.trim()}
+				disabled={sessionState !== 'connected' || !draft.trim()}
 			>
 				Send
 			</button>
 		</div>
 	</form>
 
-	<DebugPanel {logs} />
+	<DebugPanel {logs} state={sessionState} {apiCalls} {lastError} {lastChangeAt} onapicall={handleApiCall} />
 </main>

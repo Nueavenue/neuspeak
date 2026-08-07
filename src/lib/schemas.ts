@@ -34,12 +34,61 @@ export const realtimeSessionResponseSchema = z.object({
 	expiresAt: z.number().nullable()
 });
 
+const battleScoreSchema = z.object({
+	overall: z.number().min(0).max(100),
+	fluency: z.number().min(0).max(100),
+	vocabulary: z.number().min(0).max(100),
+	grammar: z.number().min(0).max(100),
+	feedback: z.string()
+});
+
+const battleHistoryItemSchema = z.object({
+	id: z.string(),
+	transcript: z.string(),
+	points: z.number(),
+	feedback: z.string(),
+	durationMs: z.number(),
+	createdAt: z.string()
+});
+
+export const accountStatsSchema = z.object({
+	id: z.string(),
+	totalPoints: z.number(),
+	battleCount: z.number(),
+	rank: z.number(),
+	totalAccounts: z.number(),
+	history: z.array(battleHistoryItemSchema)
+});
+
+export const battleResponseSchema = z.object({
+	transcript: z.string(),
+	score: battleScoreSchema,
+	points: z.number(),
+	stats: accountStatsSchema
+});
+
+export const leaderboardEntrySchema = z.object({
+	rank: z.number(),
+	id: z.string(),
+	totalPoints: z.number(),
+	battles: z.number()
+});
+
+export const leaderboardResponseSchema = z.object({
+	leaderboard: z.array(leaderboardEntrySchema)
+});
+
 export const errorResponseSchema = z.object({
-	error: z.string()
+	error: z.string(),
+	/** Short machine-friendly category, e.g. "invalid_input", "upstream_error". */
+	info: z.string().optional()
 });
 
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
 export type AiRequest = z.infer<typeof aiRequestSchema>;
 export type AiResponse = z.infer<typeof aiResponseSchema>;
 export type AsrResponse = z.infer<typeof asrResponseSchema>;
+export type AccountStats = z.infer<typeof accountStatsSchema>;
+export type BattleResponse = z.infer<typeof battleResponseSchema>;
+export type LeaderboardResponse = z.infer<typeof leaderboardResponseSchema>;
 export type ErrorResponse = z.infer<typeof errorResponseSchema>;

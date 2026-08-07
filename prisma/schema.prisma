@@ -1,0 +1,43 @@
+// NeuSpeak persistence layer.
+// SQLite for local dev; swap the datasource provider for production (e.g.
+// Postgres via Vercel Postgres/Neon) — the schema itself is portable. The
+// actual connection URL lives in prisma.config.ts (Prisma 7 requires driver
+// adapters; see src/lib/server/db.ts), not here.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/lib/server/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+/// One row per browser that has visited NeuSpeak, identified by a signed,
+/// httpOnly cookie (see src/hooks.server.ts). Not a real login — no
+/// password/email — just enough identity to track voice battle history and
+/// a leaderboard position across visits from the same browser.
+model Account {
+  id        String   @id @default(cuid())
+  /// Public-facing ID shown in the UI, e.g. "NS-A1B2C3D4".
+  displayId String   @unique
+  createdAt DateTime @default(now())
+  battles   Battle[]
+}
+
+/// One graded voice recording ("voice battle" round).
+model Battle {
+  id         String   @id @default(cuid())
+  accountId  String
+  account    Account  @relation(fields: [accountId], references: [id])
+  transcript String
+  /// Recorded clip length in milliseconds (client-reported).
+  durationMs Int
+  /// The battle's score/points, 0-100 (see src/lib/server/scoring.ts).
+  points     Int
+  /// One short, encouraging tip from the judge model.
+  feedback   String
+  createdAt  DateTime @default(now())
+
+  @@index([accountId])
+}
