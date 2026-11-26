@@ -59,6 +59,33 @@
 		} catch {
 			// Non-critical — the voice battle card just shows a loading state.
 		}
+
+		/** @param {MessageEvent} ev */
+		function onParentMessage(ev) {
+			const msg = ev.data;
+			if (!msg || typeof msg !== 'object') return;
+			if (msg.type === 'osneu-ec-seed' && typeof msg.text === 'string' && msg.text.trim()) {
+				draft = msg.text.trim();
+				pushLog('Seeded practice line from os.neu Copy to app.neu');
+			}
+		}
+		window.addEventListener('message', onParentMessage);
+
+		/** @param {MouseEvent} ev */
+		function onCtx(ev) {
+			const selected = window.getSelection()?.toString()?.trim() || '';
+			if (!selected) return;
+			const embed = new URLSearchParams(window.location.search).get('embed') === 'osneu';
+			if (!embed || window.parent === window) return;
+			ev.preventDefault();
+			window.parent.postMessage({ type: 'osneu-ec-copy-selection', text: selected }, '*');
+		}
+		document.addEventListener('contextmenu', onCtx);
+
+		return () => {
+			window.removeEventListener('message', onParentMessage);
+			document.removeEventListener('contextmenu', onCtx);
+		};
 	});
 
 	async function startConversationSession() {
@@ -193,7 +220,7 @@
 	}
 </script>
 
-<main class="max-w-xl gap-5 px-4 py-6 sm:px-6 sm:py-8 mx-auto flex min-h-screen w-full flex-col">
+<main class="ns-main max-w-xl gap-5 px-4 py-6 sm:px-6 sm:py-8 mx-auto flex min-h-screen w-full flex-col">
 	<HeaderStatus state={sessionState} />
 
 	<section class="bg-white p-4 shadow-soft sm:p-5 rounded-[1.75rem]">

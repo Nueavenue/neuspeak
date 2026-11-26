@@ -30,9 +30,13 @@
 		onapicall
 	} = $props();
 
-	// Hidden by default in production builds — pass forceShow to opt back in
-	// (e.g. for a staging environment) without needing a dev build.
-	const visible = $derived(import.meta.env.DEV || forceShow);
+	// Hide debug chrome inside os.neu embed unless ?debug=1 — beginners hit "Last error" first.
+	const embedQuiet = $derived(
+		typeof window !== 'undefined' &&
+			new URLSearchParams(window.location.search).get('embed') === 'osneu' &&
+			new URLSearchParams(window.location.search).get('debug') !== '1'
+	);
+	const visible = $derived((import.meta.env.DEV || forceShow) && !embedQuiet);
 
 	let testingAsr = $state(false);
 	let testingAi = $state(false);
@@ -121,7 +125,7 @@
 </script>
 
 {#if visible}
-	<section class="rounded-[1.75rem] border border-white/60 bg-white/70 p-4 shadow-soft backdrop-blur-md sm:p-5">
+	<section class="ns-debug rounded-[1.75rem] border border-ink/25 bg-transparent p-4 sm:p-5">
 		<div class="mb-3 flex items-center justify-between gap-3">
 			<div>
 				<h2 class="text-lg font-bold text-ink">Debug</h2>
@@ -224,7 +228,7 @@
 		{/if}
 
 		<div
-			class="max-h-44 overflow-y-auto rounded-bubble bg-ink px-3 py-3 font-mono text-[11px] leading-relaxed text-cream-100"
+			class="ns-debug-log max-h-44 overflow-y-auto rounded-bubble border border-ink/20 bg-transparent px-3 py-3 font-mono text-[12px] leading-relaxed text-ink"
 		>
 			{#if logs.length === 0}
 				<p class="text-ink-soft">Waiting for events…</p>

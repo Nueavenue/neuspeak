@@ -20,3 +20,144 @@
 		background-attachment: fixed;
 	}
 }
+
+/* os.neu Seat Face embed — dark mint to match one product */
+html[data-theme='osneu'] body {
+	color: #f4efe6;
+	background-color: #0b0c0a;
+	background-image:
+		radial-gradient(ellipse 70% 45% at 50% -12%, rgba(155, 231, 200, 0.12), transparent),
+		radial-gradient(ellipse 50% 35% at 100% 0%, rgba(61, 220, 151, 0.06), transparent);
+}
+
+/* Filled cards only — keep transparent tiles/debug clear of forced gray fill */
+html[data-theme='osneu'] .bg-white:not(.ns-nav-tile):not(.ns-debug):not(.ns-status-idle),
+html[data-theme='osneu'] .bg-white\/80:not(.ns-debug),
+html[data-theme='osneu'] .bg-cream-50:not(.ns-debug),
+html[data-theme='osneu'] .bg-cream-50\/80,
+html[data-theme='osneu'] .bg-cream-100,
+html[data-theme='osneu'] .bg-cream-200 {
+	background-color: #131410 !important;
+}
+
+html[data-theme='osneu'] .text-ink,
+html[data-theme='osneu'] .font-bold.text-ink {
+	color: #f4efe6 !important;
+}
+
+/* Stronger secondary text */
+html[data-theme='osneu'] .text-ink-muted,
+html[data-theme='osneu'] .text-ink-soft {
+	color: rgba(244, 239, 230, 0.86) !important;
+}
+
+html[data-theme='osneu'] .ns-status-idle {
+	background-color: transparent !important;
+	color: #f4efe6 !important;
+	border-color: rgba(155, 231, 200, 0.55) !important;
+}
+
+html[data-theme='osneu'] .ns-status-on.bg-ink,
+html[data-theme='osneu'] .ns-status-on.bg-brand {
+	background-color: #9be7c8 !important;
+	color: #0b0c0a !important;
+	border-color: #9be7c8 !important;
+}
+
+html[data-theme='osneu'] .ns-nav-tile {
+	background-color: transparent !important;
+	border: 1.5px solid rgba(155, 231, 200, 0.65) !important;
+}
+
+html[data-theme='osneu'] .ns-nav-tile:hover {
+	border-color: #9be7c8 !important;
+	background-color: rgba(155, 231, 200, 0.08) !important;
+}
+
+html[data-theme='osneu'] .ns-debug,
+html[data-theme='osneu'] .ns-debug-log {
+	background-color: transparent !important;
+	border-color: rgba(244, 239, 230, 0.28) !important;
+	color: #f4efe6 !important;
+}
+
+/* Never clip status pills */
+html[data-theme='osneu'] .ns-status-strip,
+.ns-status-strip {
+	max-width: none !important;
+	overflow: visible !important;
+}
+
+.ns-status-pill {
+	box-sizing: border-box;
+	min-height: 1.5rem;
+}
+
+html[data-theme='osneu'] .border-ink\/5,
+html[data-theme='osneu'] .border-cream-200 {
+	border-color: rgba(244, 239, 230, 0.12) !important;
+}
+
+html[data-theme='osneu'] .bg-ink {
+	background-color: #9be7c8 !important;
+	color: #0b0c0a !important;
+}
+
+html[data-theme='osneu'] .bg-brand,
+html[data-theme='osneu'] .from-brand,
+html[data-theme='osneu'] .to-brand-light {
+	--tw-gradient-from: #3ddc97 !important;
+	--tw-gradient-to: #9be7c8 !important;
+	background-color: #3ddc97 !important;
+	color: #0b0c0a !important;
+}
+
+html[data-theme='osneu'] .text-brand-dark,
+html[data-theme='osneu'] .bg-brand-soft {
+	color: #9be7c8 !important;
+	background-color: rgba(155, 231, 200, 0.16) !important;
+}
+
+html[data-theme='osneu'] .hover\:bg-brand:hover,
+html[data-theme='osneu'] .enabled\:hover\:bg-brand:hover:enabled {
+	background-color: #7fd4b0 !important;
+}
+
+html[data-theme='osneu'] .shadow-soft,
+html[data-theme='osneu'] .shadow-card {
+	box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35) !important;
+}
+
+html[data-theme='osneu'] input,
+html[data-theme='osneu'] textarea {
+	background-color: #1b1c17 !important;
+	color: #f4efe6 !important;
+	border-color: rgba(244, 239, 230, 0.14) !important;
+}
+
+html[data-embed='osneu'] .ns-chrome {
+	padding-inline: clamp(0.5rem, 2vw, 1rem);
+}
+
+html[data-embed='osneu'] .ns-main {
+	max-width: min(100%, 52rem);
+	min-height: 0 !important;
+	padding-inline: clamp(0.5rem, 2.5vw, 1rem);
+	padding-block: clamp(0.75rem, 2vw, 1.5rem);
+	gap: clamp(0.75rem, 2vw, 1.25rem);
+}
+
+html[data-embed='osneu'] body {
+	overflow-x: hidden;
+}
+
+@media (max-width: 640px) {
+	html[data-embed='osneu'] .ns-nav-links {
+		display: none;
+	}
+
+	html[data-theme='osneu'] body,
+	html[data-theme='cream'] body {
+		font-size: 14px;
+	}
+}

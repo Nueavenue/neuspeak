@@ -15,7 +15,11 @@ import type { PageServerLoad } from './$types';
 export const load: PageServerLoad = async ({ locals, url }) => {
 	const { user } = await locals.safeGetSession();
 
-	if (!user) {
+	// os.neu Seat Face embeds NeuSpeak with ?embed=osneu — allow guest coach
+	// without bouncing to /login (Realtime session still needs OPENAI_API_KEY).
+	const osneuEmbed = url.searchParams.get('embed') === 'osneu';
+
+	if (!user && !osneuEmbed) {
 		const redirectTo = encodeURIComponent(url.pathname + url.search);
 		redirect(303, `/login?redirectTo=${redirectTo}`);
 	}

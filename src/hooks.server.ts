@@ -65,4 +65,30 @@ const anonymousAccountHandle: Handle = async ({ event, resolve }) => {
 	return resolve(event);
 };
 
-export const handle: Handle = sequence(supabaseAuthHandle, anonymousAccountHandle);
+/**
+ * Allow os.neu Seat Face (and local Vite) to embed NeuSpeak as an in-seat
+ * workspace iframe — not a popup. Does not widen cookie/auth scope.
+ */
+const embedForOsNeuHandle: Handle = async ({ event, resolve }) => {
+	const response = await resolve(event);
+	response.headers.set(
+		'Content-Security-Policy',
+		[
+			"frame-ancestors 'self'",
+			'http://127.0.0.1:*',
+			'http://localhost:*',
+			'https://os.neuavenue.com',
+			'https://*.neuavenue.com',
+			'app://*',
+			'file:'
+		].join(' ')
+	);
+	response.headers.delete('X-Frame-Options');
+	return response;
+};
+
+export const handle: Handle = sequence(
+	supabaseAuthHandle,
+	anonymousAccountHandle,
+	embedForOsNeuHandle
+);
