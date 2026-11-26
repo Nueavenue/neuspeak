@@ -1,6 +1,6 @@
 // src/lib/auth/supabaseClient.ts
 import { createBrowserClient } from '@supabase/ssr';
-import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
+import { publicSupabaseAnonKey, publicSupabaseUrl } from '$lib/auth/publicEnv';
 
 /**
  * Browser-side Supabase client for auth calls that must run in the browser
@@ -14,4 +14,7 @@ import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/publi
  * and used for data queries with the anon key — that one is never imported
  * here, and this one is never imported from a +server.ts route.
  */
-export const supabase = createBrowserClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY);
+const url = publicSupabaseUrl() || 'https://placeholder.invalid';
+const anon = publicSupabaseAnonKey() || 'public-anon-placeholder';
+
+export const supabase = createBrowserClient(url, anon);

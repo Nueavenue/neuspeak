@@ -3,7 +3,7 @@ import type { Handle } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
 import { createServerClient } from '@supabase/ssr';
 import { dev } from '$app/environment';
-import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
+import { publicSupabaseAnonKey, publicSupabaseUrl } from '$lib/auth/publicEnv';
 import { createSafeGetSession } from '$lib/auth/session';
 
 const ACCOUNT_COOKIE = 'ns_account';
@@ -16,7 +16,9 @@ const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
  * to decide what to render and whether to redirect to /login.
  */
 const supabaseAuthHandle: Handle = async ({ event, resolve }) => {
-	event.locals.supabase = createServerClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, {
+	const supabaseUrl = publicSupabaseUrl() || 'https://placeholder.invalid';
+	const supabaseAnon = publicSupabaseAnonKey() || 'public-anon-placeholder';
+	event.locals.supabase = createServerClient(supabaseUrl, supabaseAnon, {
 		cookies: {
 			getAll: () => event.cookies.getAll(),
 			setAll: (cookiesToSet) => {
